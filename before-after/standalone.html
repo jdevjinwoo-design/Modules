@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Before/After 임베드 테스트</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: one centered column — two image slots side by side, the embedded slider below, then the embed snippet. */
+  :root {
+    --bg: #f3f4f6; --surface: #ffffff; --fg: #1b1f27; --muted: #5d6573;
+    --line: #d9dde4; --accent: #2457c5; --accent-soft: #e4ecfb;
+    --sans: "IBM Plex Sans KR", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #12151b; --surface: #1b2029; --fg: #e8ebf0; --muted: #9aa3b2;
+    --line: #2d3440; --accent: #7aa2ff; --accent-soft: #1f2b45; color-scheme: dark } }
+  :root[data-theme="dark"] {
+    --bg: #12151b; --surface: #1b2029; --fg: #e8ebf0; --muted: #9aa3b2;
+    --line: #2d3440; --accent: #7aa2ff; --accent-soft: #1f2b45; color-scheme: dark }
+
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); }
+  main {
+    max-width: 920px; margin: 0 auto; display: grid; gap: 24px;
+    padding-block: 32px 56px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  header { display: grid; gap: 4px; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin: 0; text-wrap: balance; }
+  header p { margin: 0; color: var(--muted); max-width: 62ch; }
+  code, .mono { font-family: var(--mono); }
+
+  .slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .slots { grid-template-columns: 1fr; } }
+  .slot {
+    display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: center;
+    padding: 12px; border: 1.5px dashed var(--line); border-radius: 10px;
+    background: var(--surface); cursor: pointer; transition: border-color .15s, background .15s;
+    position: relative;
+  }
+  .slot:hover, .slot.drag { border-color: var(--accent); background: var(--accent-soft); }
+  .slot:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .slot input {
+    /* Cover the whole slot so a tap lands on the input itself (mobile browsers ignore taps forwarded from a label). */
+    position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; z-index: 1;
+  }
+  .thumb { width: 64px; height: 64px; border-radius: 6px; object-fit: cover; background: var(--line); }
+  .slot-text { min-width: 0; display: grid; }
+  .slot-label { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .slot-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slot-hint { font-size: 13px; color: var(--muted); }
+  .slot-wrap { display: grid; gap: 6px; min-width: 0; }
+  .paste {
+    font: 14px var(--sans); color: var(--fg); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; box-sizing: border-box;
+  }
+  .paste::placeholder { color: var(--muted); }
+  .paste:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+  .paste.bad { border-color: #c2410c; }
+  header .note { font-size: 13px; }
+
+  .stage { display: grid; gap: 8px; }
+  .stage before-after { --ba-radius: 10px; width: 100%; }
+  .readout { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
+  .readout b { color: var(--fg); font-family: var(--mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .readout button {
+    font: inherit; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline;
+  }
+  .readout button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  details { border-top: 1px solid var(--line); padding-top: 16px; }
+  summary { cursor: pointer; font-weight: 600; }
+  pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font: 13px/1.6 var(--mono); }
+</style>
+
+<main>
+  <header>
+    <h1>Before/After 슬라이더 임베드 테스트</h1>
+    <p>왼쪽 칸에 Before, 오른쪽 칸에 After 이미지를 올리면 아래 좌우 슬라이더에 바로 반영됩니다. 클릭하거나 파일을 끌어다 놓으세요. 처음에는 예시 이미지가 들어 있습니다.</p>
+    <p class="note">모바일 앱에서 사진 선택 창이 열리지 않으면 사진을 복사한 뒤 칸 아래 입력란을 길게 눌러 붙여넣거나, 이 링크를 Safari·Chrome에서 여세요.</p>
+  </header>
+
+  <section class="slots" aria-label="이미지 선택">
+    <div class="slot-wrap">
+    <label class="slot" id="slot-before">
+      <input type="file" id="file-before" accept="image/*">
+      <img class="thumb" id="thumb-before" alt="">
+      <span class="slot-text">
+        <span class="slot-label">왼쪽 · Before</span>
+        <span class="slot-name" id="name-before">예시 이미지</span>
+        <span class="slot-hint">눌러서 사진 선택 또는 드래그</span>
+      </span>
+    </label>
+    <input type="text" class="paste" id="paste-before" placeholder="또는 여기를 길게 눌러 붙여넣기" aria-label="Before 이미지 붙여넣기" autocomplete="off">
+    </div>
+    <div class="slot-wrap">
+    <label class="slot" id="slot-after">
+      <input type="file" id="file-after" accept="image/*">
+      <img class="thumb" id="thumb-after" alt="">
+      <span class="slot-text">
+        <span class="slot-label">오른쪽 · After</span>
+        <span class="slot-name" id="name-after">예시 이미지</span>
+        <span class="slot-hint">눌러서 사진 선택 또는 드래그</span>
+      </span>
+    </label>
+    <input type="text" class="paste" id="paste-after" placeholder="또는 여기를 길게 눌러 붙여넣기" aria-label="After 이미지 붙여넣기" autocomplete="off">
+    </div>
+  </section>
+
+  <section class="stage">
+    <before-after id="ba" orientation="horizontal" value="50" before-label="Before" after-label="After"></before-after>
+    <div class="readout">
+      <span>구분선 위치 <b id="pos">50%</b> · 드래그, 클릭, ←/→ 키</span>
+      <button type="button" id="reset">예시 이미지로 되돌리기</button>
+    </div>
+  </section>
+
+  <details>
+    <summary>이 페이지에서 쓴 임베드 코드</summary>
+<pre><code>&lt;script src="before-after.js" defer&gt;&lt;/script&gt;
+
+&lt;before-after
+  orientation="horizontal"
+  before="before.jpg"
+  after="after.jpg"&gt;
+&lt;/before-after&gt;</code></pre>
+  </details>
+</main>
+
+<script>
+/*!
+ * <before-after> — dependency-free before/after image comparison slider.
+ *
+ * Usage:
+ *   load before-after.js with a <script defer> tag, then:
+ *   <before-after before="a.jpg" after="b.jpg" orientation="horizontal"></before-after>
+ *
+ * Attributes:
+ *   before / after        image URLs (required)
+ *   before-alt/after-alt  alt text
+ *   before-label/after-label  corner labels (default "Before"/"After"; "" hides)
+ *   orientation           "horizontal" (left/right, default) | "vertical" (top/bottom)
+ *   value                 initial divider position 0–100 (default 50)
+ *   hover                 present → divider follows the pointer without clicking
+ *   ratio                 fixed aspect ratio, e.g. "16/9" (default: the after image's natural ratio)
+ *
+ * CSS custom properties (set on the element):
+ *   --ba-line-color, --ba-line-width, --ba-handle-size, --ba-handle-bg,
+ *   --ba-handle-color, --ba-label-bg, --ba-label-color, --ba-radius
+ *
+ * Events: "input" while dragging, "change" when released; event.detail.value.
+ */
+(() => {
+  if (customElements.get('before-after')) return;
+
+  const template = document.createElement('template');
+  template.innerHTML = `
+<style>
+  :host {
+    --ba-line-color: #fff;
+    --ba-line-width: 2px;
+    --ba-handle-size: 44px;
+    --ba-handle-bg: rgba(255,255,255,.95);
+    --ba-handle-color: #222;
+    --ba-label-bg: rgba(0,0,0,.55);
+    --ba-label-color: #fff;
+    --ba-radius: 0px;
+    --pos: 50%;
+    display: block;
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--ba-radius);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: pan-y;
+    cursor: ew-resize;
+    line-height: 0;
+    background: #ddd;
+  }
+  :host([orientation="vertical"]) { touch-action: pan-x; cursor: ns-resize; }
+  :host([hidden]) { display: none; }
+  :host(:focus-visible) { outline: 3px solid #4c9ffe; outline-offset: 2px; }
+
+  img { display: block; width: 100%; height: auto; pointer-events: none; -webkit-user-drag: none; }
+  :host([ratio]) .base, .over { height: 100%; object-fit: cover; }
+  :host([ratio]) .base { position: absolute; inset: 0; }
+  .over {
+    position: absolute; inset: 0;
+    clip-path: inset(0 calc(100% - var(--pos)) 0 0);
+  }
+  :host([orientation="vertical"]) .over { clip-path: inset(0 0 calc(100% - var(--pos)) 0); }
+
+  .line {
+    position: absolute; top: 0; bottom: 0; left: var(--pos);
+    width: var(--ba-line-width); transform: translateX(-50%);
+    background: var(--ba-line-color);
+    box-shadow: 0 0 6px rgba(0,0,0,.35);
+    pointer-events: none;
+  }
+  :host([orientation="vertical"]) .line {
+    top: var(--pos); bottom: auto; left: 0; right: 0;
+    width: auto; height: var(--ba-line-width); transform: translateY(-50%);
+  }
+  .handle {
+    position: absolute; top: 50%; left: 50%;
+    width: var(--ba-handle-size); height: var(--ba-handle-size);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: var(--ba-handle-bg); color: var(--ba-handle-color);
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    display: grid; place-items: center;
+  }
+  .handle svg { width: 60%; height: 60%; }
+  :host([orientation="vertical"]) .handle svg { transform: rotate(90deg); }
+
+  .label {
+    position: absolute; top: 12px;
+    padding: 6px 10px; border-radius: 4px;
+    font: 600 12px/1 system-ui, -apple-system, sans-serif;
+    letter-spacing: .04em; text-transform: uppercase;
+    background: var(--ba-label-bg); color: var(--ba-label-color);
+    pointer-events: none; transition: opacity .2s;
+  }
+  .label:empty { display: none; }
+  .label.before { left: 12px; }
+  .label.after { right: 12px; }
+  :host([orientation="vertical"]) .label.after { top: auto; bottom: 12px; left: 12px; right: auto; }
+</style>
+<img class="base" part="after-image" alt="">
+<img class="over" part="before-image" alt="">
+<span class="label before" part="label before-label"></span>
+<span class="label after" part="label after-label"></span>
+<div class="line" part="line">
+  <div class="handle" part="handle">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="9 6 3 12 9 18"></polyline><polyline points="15 6 21 12 15 18"></polyline>
+    </svg>
+  </div>
+</div>`;
+
+  const clamp = (n) => Math.min(100, Math.max(0, n));
+
+  class BeforeAfter extends HTMLElement {
+    static get observedAttributes() {
+      return ['before', 'after', 'before-alt', 'after-alt', 'before-label', 'after-label',
+              'orientation', 'value', 'ratio'];
+    }
+
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.appendChild(template.content.cloneNode(true));
+      this._base = root.querySelector('.base');
+      this._over = root.querySelector('.over');
+      this._labelBefore = root.querySelector('.label.before');
+      this._labelAfter = root.querySelector('.label.after');
+      this._value = 50;
+      this._dragging = false;
+
+      this._onDown = this._onDown.bind(this);
+      this._onMove = this._onMove.bind(this);
+      this._onUp = this._onUp.bind(this);
+      this._onKey = this._onKey.bind(this);
+    }
+
+    connectedCallback() {
+      if (!this.hasAttribute('tabindex')) this.tabIndex = 0;
+      this.setAttribute('role', 'slider');
+      this.setAttribute('aria-valuemin', '0');
+      this.setAttribute('aria-valuemax', '100');
+      if (!this.hasAttribute('aria-label')) this.setAttribute('aria-label', 'Before/after comparison');
+      this.addEventListener('pointerdown', this._onDown);
+      this.addEventListener('pointermove', this._onMove);
+      this.addEventListener('pointerup', this._onUp);
+      this.addEventListener('pointercancel', this._onUp);
+      this.addEventListener('keydown', this._onKey);
+      this._render();
+    }
+
+    disconnectedCallback() {
+      this.removeEventListener('pointerdown', this._onDown);
+      this.removeEventListener('pointermove', this._onMove);
+      this.removeEventListener('pointerup', this._onUp);
+      this.removeEventListener('pointercancel', this._onUp);
+      this.removeEventListener('keydown', this._onKey);
+    }
+
+    attributeChangedCallback(name) {
+      if (name === 'value') {
+        const v = parseFloat(this.getAttribute('value'));
+        if (!Number.isNaN(v)) this._setValue(v, false);
+        return;
+      }
+      this._render();
+    }
+
+    get value() { return this._value; }
+    set value(v) { this._setValue(Number(v), false); }
+
+    get orientation() { return this.getAttribute('orientation') === 'vertical' ? 'vertical' : 'horizontal'; }
+    set orientation(v) { this.setAttribute('orientation', v); }
+
+    _render() {
+      const attr = (n, d = '') => (this.hasAttribute(n) ? this.getAttribute(n) : d);
+      // "after" is the full base layer; "before" is clipped on top of it.
+      if (this._base.getAttribute('src') !== attr('after')) this._base.src = attr('after');
+      if (this._over.getAttribute('src') !== attr('before')) this._over.src = attr('before');
+      this._base.alt = attr('after-alt', 'After');
+      this._over.alt = attr('before-alt', 'Before');
+      this._labelBefore.textContent = attr('before-label', 'Before');
+      this._labelAfter.textContent = attr('after-label', 'After');
+      this.style.aspectRatio = attr('ratio');
+      this.setAttribute('aria-orientation', this.orientation);
+      this._paint();
+    }
+
+    _setValue(v, emit) {
+      if (Number.isNaN(v)) return;
+      v = clamp(v);
+      if (v === this._value) return;
+      this._value = v;
+      this._paint();
+      if (emit) this.dispatchEvent(new CustomEvent('input', { detail: { value: v }, bubbles: true }));
+    }
+
+    _paint() {
+      this.style.setProperty('--pos', this._value + '%');
+      this.setAttribute('aria-valuenow', String(Math.round(this._value)));
+      // Fade a label out when the divider covers it.
+      this._labelBefore.style.opacity = this._value < 15 ? '0' : '';
+      this._labelAfter.style.opacity = this._value > 85 ? '0' : '';
+    }
+
+    _fromEvent(e) {
+      const r = this.getBoundingClientRect();
+      return this.orientation === 'vertical'
+        ? ((e.clientY - r.top) / r.height) * 100
+        : ((e.clientX - r.left) / r.width) * 100;
+    }
+
+    _emitChange() {
+      this.dispatchEvent(new CustomEvent('change', { detail: { value: this._value }, bubbles: true }));
+    }
+
+    _onDown(e) {
+      if (e.button !== 0) return;
+      this._dragging = true;
+      this.setPointerCapture(e.pointerId);
+      this._setValue(this._fromEvent(e), true);
+    }
+
+    _onMove(e) {
+      if (this._dragging || (this.hasAttribute('hover') && e.pointerType === 'mouse')) {
+        this._setValue(this._fromEvent(e), true);
+      }
+    }
+
+    _onUp(e) {
+      if (!this._dragging) return;
+      this._dragging = false;
+      if (this.hasPointerCapture(e.pointerId)) this.releasePointerCapture(e.pointerId);
+      this._emitChange();
+    }
+
+    _onKey(e) {
+      const step = e.shiftKey ? 10 : 1;
+      const keys = {
+        ArrowLeft: -step, ArrowDown: -step, ArrowRight: step, ArrowUp: step,
+        PageDown: -10, PageUp: 10, Home: -Infinity, End: Infinity,
+      };
+      if (!(e.key in keys)) return;
+      e.preventDefault();
+      // In vertical mode, ArrowDown moves the divider down (towards "after").
+      let d = keys[e.key];
+      if (this.orientation === 'vertical' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) d = -d;
+      this._setValue(this._value + d, true);
+      this._emitChange();
+    }
+  }
+
+  customElements.define('before-after', BeforeAfter);
+})();
+</script>
+<script>
+  const ba = document.getElementById('ba');
+  const pos = document.getElementById('pos');
+  const slots = {
+    before: { slot: 'slot-before', file: 'file-before', thumb: 'thumb-before', name: 'name-before' },
+    after:  { slot: 'slot-after',  file: 'file-after',  thumb: 'thumb-after',  name: 'name-after' },
+  };
+  const objectUrls = {};
+  let samples = null;
+
+  // Example images drawn on a canvas: a mountain scene; "before" is dim and desaturated.
+  function drawSamples() {
+    const c = document.createElement('canvas');
+    c.width = 1200; c.height = 750;
+    const g = c.getContext('2d');
+    const sky = g.createLinearGradient(0, 0, 0, 750);
+    sky.addColorStop(0, '#2f6fd6'); sky.addColorStop(.55, '#f3b26b'); sky.addColorStop(1, '#f7d9a8');
+    g.fillStyle = sky; g.fillRect(0, 0, 1200, 750);
+    g.fillStyle = '#fff4c9'; g.beginPath(); g.arc(860, 300, 70, 0, Math.PI * 2); g.fill();
+    const ridge = (base, amp, seed, color) => {
+      g.fillStyle = color; g.beginPath(); g.moveTo(0, 750);
+      for (let x = 0; x <= 1200; x += 20) {
+        g.lineTo(x, base - Math.abs(Math.sin(x / 140 + seed)) * amp - Math.sin(x / 47 + seed * 3) * amp * .12);
+      }
+      g.lineTo(1200, 750); g.fill();
+    };
+    ridge(470, 170, 1.3, '#5b4a7a');
+    ridge(560, 130, 2.9, '#2f3e5c');
+    ridge(660, 90, 4.2, '#1d2a33');
+    g.fillStyle = '#16232b'; g.fillRect(0, 690, 1200, 60);
+    const after = c.toDataURL('image/jpeg', .88);
+
+    const d = document.createElement('canvas');
+    d.width = 1200; d.height = 750;
+    const h = d.getContext('2d');
+    h.filter = 'grayscale(.85) brightness(.7) contrast(.85) blur(1.5px)';
+    h.drawImage(c, 0, 0);
+    return { before: d.toDataURL('image/jpeg', .88), after };
+  }
+
+  function setImage(side, url, name) {
+    const s = slots[side];
+    ba.setAttribute(side, url);
+    document.getElementById(s.thumb).src = url;
+    document.getElementById(s.name).textContent = name;
+  }
+
+  function useFile(side, file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    if (objectUrls[side]) URL.revokeObjectURL(objectUrls[side]);
+    objectUrls[side] = URL.createObjectURL(file);
+    setImage(side, objectUrls[side], file.name);
+  }
+
+  function loadSamples() {
+    samples = samples || drawSamples();
+    for (const side of ['before', 'after']) {
+      if (objectUrls[side]) { URL.revokeObjectURL(objectUrls[side]); delete objectUrls[side]; }
+      document.getElementById(slots[side].file).value = '';
+      const paste = document.getElementById('paste-' + side);
+      paste.placeholder = '또는 여기를 길게 눌러 붙여넣기'; paste.classList.remove('bad');
+      setImage(side, samples[side], '예시 이미지');
+    }
+  }
+
+  for (const side of ['before', 'after']) {
+    const s = slots[side];
+    const slot = document.getElementById(s.slot);
+    document.getElementById(s.file).addEventListener('change', (e) => useFile(side, e.target.files[0]));
+    slot.addEventListener('dragover', (e) => { e.preventDefault(); slot.classList.add('drag'); });
+    slot.addEventListener('dragleave', () => slot.classList.remove('drag'));
+    slot.addEventListener('drop', (e) => {
+      e.preventDefault(); slot.classList.remove('drag');
+      useFile(side, e.dataTransfer.files[0]);
+    });
+    // Paste fallback for viewers that block the file picker.
+    const paste = document.getElementById('paste-' + side);
+    paste.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const item = [...(e.clipboardData?.items || [])].find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+      const file = item && item.getAsFile();
+      if (file) {
+        useFile(side, new File([file], file.name || '붙여넣은 이미지', { type: file.type }));
+        paste.value = ''; paste.placeholder = '붙여넣었습니다'; paste.classList.remove('bad'); paste.blur();
+      } else {
+        paste.value = ''; paste.placeholder = '이미지가 아닙니다. 사진을 복사한 뒤 다시 붙여넣으세요'; paste.classList.add('bad');
+      }
+    });
+    paste.addEventListener('input', () => { paste.value = ''; });
+  }
+
+  ba.addEventListener('input', (e) => { pos.textContent = Math.round(e.detail.value) + '%'; });
+  document.getElementById('reset').addEventListener('click', loadSamples);
+  loadSamples();
+</script>
+
+</html>
