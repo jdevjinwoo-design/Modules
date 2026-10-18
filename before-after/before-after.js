@@ -2,7 +2,7 @@
  * <before-after> — dependency-free before/after image comparison slider.
  *
  * Usage:
- *   <script src="before-after.js" defer></script>
+ *   load before-after.js with a <script defer> tag, then:
  *   <before-after before="a.jpg" after="b.jpg" orientation="horizontal"></before-after>
  *
  * Attributes:
