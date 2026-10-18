@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Before/After Slider Demo</title>
+<script src="before-after.js" defer></script>
+<style>
+  body { font: 16px/1.6 system-ui, -apple-system, sans-serif; margin: 0; padding: 24px 16px 64px; background: #f6f6f4; color: #222; }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 40px 0 12px; }
+  p { margin: 0 0 12px; color: #555; }
+  code { background: #e9e9e4; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  iframe { width: 100%; aspect-ratio: 3/2; border: 0; border-radius: 12px; display: block; }
+  #out { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>&lt;before-after&gt; slider</h1>
+  <p>Drag, click, tap, or focus and use the arrow keys.</p>
+
+  <h2>Horizontal (left / right)</h2>
+  <before-after id="h"
+    before="https://picsum.photos/id/1018/1200/800?grayscale"
+    after="https://picsum.photos/id/1018/1200/800"
+    style="--ba-radius: 12px"></before-after>
+  <p>Position: <span id="out">50</span>%</p>
+
+  <h2>Vertical (top / bottom)</h2>
+  <before-after orientation="vertical" value="35"
+    before="https://picsum.photos/id/1043/1200/800?grayscale&blur=2"
+    after="https://picsum.photos/id/1043/1200/800"
+    before-label="Original" after-label="Edited"
+    style="--ba-radius: 12px"></before-after>
+
+  <h2>Hover mode, custom theme</h2>
+  <div class="grid">
+    <before-after hover ratio="1/1"
+      before="https://picsum.photos/id/1025/800/800?grayscale"
+      after="https://picsum.photos/id/1025/800/800"
+      style="--ba-radius: 12px; --ba-line-color: #ffcc00; --ba-handle-bg: #ffcc00; --ba-line-width: 3px"></before-after>
+    <before-after hover ratio="1/1" orientation="vertical" before-label="" after-label=""
+      before="https://picsum.photos/id/1015/800/800?grayscale"
+      after="https://picsum.photos/id/1015/800/800"
+      style="--ba-radius: 50%; --ba-handle-size: 32px"></before-after>
+  </div>
+
+  <h2>iframe embed</h2>
+  <iframe src="embed.html?before=https%3A%2F%2Fpicsum.photos%2Fid%2F1039%2F1200%2F800%3Fgrayscale&after=https%3A%2F%2Fpicsum.photos%2Fid%2F1039%2F1200%2F800&orientation=horizontal&value=60"
+    title="Before/after comparison" loading="lazy"></iframe>
+</main>
+<script>
+  document.getElementById('h').addEventListener('input', (e) => {
+    document.getElementById('out').textContent = Math.round(e.detail.value);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Before / After</title>
+<!--
+  iframe embed. All options come from the query string:
+    before, after, orientation (horizontal|vertical), value (0-100),
+    before-label, after-label, before-alt, after-alt, ratio (e.g. 16/9), hover (1)
+  e.g. embed.html?before=a.jpg&after=b.jpg&orientation=vertical
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; }
+  body { display: grid; place-items: center; }
+  before-after { width: 100%; max-height: 100vh; }
+</style>
+<script src="before-after.js"></script>
+</head>
+<body>
+<before-after></before-after>
+<script>
+  const params = new URLSearchParams(location.search);
+  const el = document.querySelector('before-after');
+  const allowed = ['before', 'after', 'orientation', 'value', 'before-label', 'after-label',
+                   'before-alt', 'after-alt', 'ratio'];
+  for (const key of allowed) if (params.has(key)) el.setAttribute(key, params.get(key));
+  if (params.get('hover') === '1') el.setAttribute('hover', '');
+  // Without a fixed ratio, fill the iframe height instead of overflowing it.
+  if (!params.has('ratio')) el.setAttribute('ratio', `${innerWidth}/${innerHeight}`);
+  addEventListener('resize', () => {
+    if (!params.has('ratio')) el.setAttribute('ratio', `${innerWidth}/${innerHeight}`);
+  });
+  // Let the parent page listen for position changes.
+  el.addEventListener('change', (e) => parent.postMessage({ type: 'before-after:change', value: e.detail.value }, '*'));
+</script>
+</body>
+</html>
