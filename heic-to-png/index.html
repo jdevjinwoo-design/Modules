@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HEIC → PNG 변환기</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f6f7f9; --card:#fff; --fg:#1b1d21; --mute:#6b7280; --line:#d9dce1; --accent:#2563eb; --ok:#15803d; --err:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111317; --card:#1b1e24; --fg:#e8eaee; --mute:#9aa1ad; --line:#2f343c; --accent:#5b8cff; --ok:#4ade80; --err:#f87171; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .sub { color:var(--mute); margin:0 0 24px; }
+  #drop { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; min-height:180px; padding:24px;
+          border:2px dashed var(--line); border-radius:14px; background:var(--card); text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
+  #drop:hover, #drop:focus-visible, #drop.over { border-color:var(--accent); outline:none; }
+  #drop strong { font-size:17px; }
+  #drop span { color:var(--mute); font-size:14px; }
+  .bar { display:flex; gap:8px; align-items:center; margin:16px 0 8px; flex-wrap:wrap; }
+  .bar .count { color:var(--mute); margin-right:auto; }
+  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.5; cursor:default; }
+  ul { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+  li { display:flex; align-items:center; gap:12px; padding:10px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  li img, li .ph { width:56px; height:56px; object-fit:cover; border-radius:6px; background:var(--line); flex:none; }
+  li .info { flex:1; min-width:0; }
+  li .name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  li .st { font-size:13px; color:var(--mute); }
+  li.done .st { color:var(--ok); }
+  li.fail .st { color:var(--err); }
+  li a { flex:none; }
+  footer { margin-top:28px; color:var(--mute); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>HEIC → PNG 변환기</h1>
+  <p class="sub">아이폰 사진(HEIC/HEIF)을 PNG로 바꿉니다. 파일은 서버로 올라가지 않고 이 브라우저 안에서만 변환됩니다.</p>
+
+  <label id="drop" tabindex="0">
+    <strong>HEIC 파일을 여기로 끌어다 놓거나 클릭해서 선택</strong>
+    <span>여러 장을 한꺼번에 넣을 수 있습니다 · .heic .heif</span>
+    <input id="pick" type="file" accept=".heic,.heif,.hif,image/heic,image/heif" multiple hidden>
+  </label>
+
+  <div class="bar" hidden id="bar">
+    <span class="count" id="count"></span>
+    <button id="zip" class="primary" disabled>모두 ZIP으로 받기</button>
+    <button id="clear">목록 비우기</button>
+  </div>
+  <ul id="list"></ul>
+
+  <footer>변환 엔진: <a href="https://github.com/hoppergee/heic-to">heic-to</a> (libheif). 처음 변환할 때 엔진(약 3MB)을 한 번 내려받습니다.</footer>
+</main>
+
+<script>
+(() => {
+  const LIB_URL = 'https://cdn.jsdelivr.net/npm/heic-to@1.6.7/dist/iife/heic-to.js';
+  const $ = (id) => document.getElementById(id);
+  const drop = $('drop'), pick = $('pick'), list = $('list'), bar = $('bar'), count = $('count'), zipBtn = $('zip');
+
+  /** @type {{name:string, blob:Blob|null, url:string|null}[]} */
+  let items = [];
+  let queue = Promise.resolve();
+  let libPromise = null;
+
+  function loadLib() {
+    if (window.HeicTo) return Promise.resolve(window.HeicTo);
+    if (!libPromise) {
+      libPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = LIB_URL;
+        s.onload = () => window.HeicTo ? resolve(window.HeicTo) : reject(new Error('변환 엔진을 불러오지 못했습니다'));
+        s.onerror = () => { libPromise = null; s.remove(); reject(new Error('변환 엔진을 내려받지 못했습니다 (인터넷 연결 확인)')); };
+        document.head.appendChild(s);
+      });
+    }
+    return libPromise;
+  }
+
+  // Safari 등 HEIC를 직접 읽을 수 있는 브라우저는 엔진 없이 바로 변환한다.
+  async function nativeToPng(file) {
+    const bmp = await createImageBitmap(file);
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    c.getContext('2d').drawImage(bmp, 0, 0);
+    bmp.close();
+    return new Promise((res, rej) => c.toBlob((b) => b ? res(b) : rej(new Error('PNG 생성 실패')), 'image/png'));
+  }
+
+  async function toPng(file) {
+    try { return await nativeToPng(file); } catch { /* 지원 안 함 → 엔진 사용 */ }
+    const HeicTo = await loadLib();
+    return HeicTo({ blob: file, type: 'image/png' });
+  }
+
+  const pngName = (n) => n.replace(/\.(heic|heif|hif)$/i, '') + '.png';
+  const isHeicName = (f) => /\.(heic|heif|hif)$/i.test(f.name) || /image\/hei[cf]/.test(f.type);
+  const fmtSize = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.ceil(n / 1024) + ' KB';
+
+  function refreshBar() {
+    const done = items.filter((i) => i.blob).length;
+    bar.hidden = items.length === 0;
+    count.textContent = `${items.length}개 중 ${done}개 완료`;
+    zipBtn.disabled = done === 0;
+  }
+
+  function addFiles(files) {
+    const used = new Set(items.map((i) => i.name));
+    for (const file of files) {
+      let name = pngName(file.name);
+      for (let k = 2; used.has(name); k++) name = pngName(file.name).replace(/\.png$/, ` (${k}).png`);
+      used.add(name);
+
+      const item = { name, blob: null, url: null };
+      items.push(item);
+      const li = document.createElement('li');
+      li.innerHTML = '<div class="ph"></div><div class="info"><div class="name"></div><div class="st">대기 중</div></div>';
+      li.querySelector('.name').textContent = file.name;
+      const st = li.querySelector('.st');
+      list.appendChild(li);
+
+      if (!isHeicName(file)) { li.className = 'fail'; st.textContent = 'HEIC/HEIF 파일이 아닙니다'; continue; }
+
+      queue = queue.then(async () => {
+        if (!items.includes(item)) return; // 목록을 비운 경우
+        st.textContent = window.HeicTo ? '변환 중…' : '변환 중… (처음엔 엔진을 내려받느라 조금 걸립니다)';
+        try {
+          const blob = await toPng(file);
+          if (!items.includes(item)) return;
+          item.blob = blob;
+          item.url = URL.createObjectURL(blob);
+          const img = document.createElement('img');
+          img.src = item.url; img.alt = '';
+          li.querySelector('.ph').replaceWith(img);
+          const a = document.createElement('a');
+          a.href = item.url; a.download = name;
+          a.innerHTML = '<button>PNG 받기</button>';
+          li.appendChild(a);
+          li.className = 'done';
+          st.textContent = `완료 · ${name} · ${fmtSize(blob.size)}`;
+        } catch (e) {
+          li.className = 'fail';
+          st.textContent = '실패: ' + (e && e.message ? e.message : e);
+        }
+        refreshBar();
+      });
+    }
+    refreshBar();
+  }
+
+  // ---- 의존성 없는 ZIP(무압축) 생성: PNG는 이미 압축돼 있어 무압축으로 충분하다 ----
+  const CRC = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  function crc32(buf) { let c = 0xffffffff; for (let i = 0; i < buf.length; i++) c = CRC[(c ^ buf[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+
+  async function makeZip(files) {
+    const enc = new TextEncoder(), parts = [], central = [];
+    const d = new Date();
+    const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    let offset = 0;
+    for (const f of files) {
+      const data = new Uint8Array(await f.blob.arrayBuffer());
+      const name = enc.encode(f.name), crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); // UTF-8 파일명
+      h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true);
+      h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true);
+      h.setUint16(26, name.length, true);
+      parts.push(h, name, data);
+
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+      c.setUint16(12, dosTime, true); c.setUint16(14, dosDate, true);
+      c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+      central.push(c, name);
+      offset += 30 + name.length + data.length;
+    }
+    const size = central.reduce((s, p) => s + p.byteLength, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+    e.setUint32(12, size, true); e.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, e], { type: 'application/zip' });
+  }
+
+  zipBtn.addEventListener('click', async () => {
+    const done = items.filter((i) => i.blob);
+    if (!done.length) return;
+    zipBtn.disabled = true;
+    try {
+      const url = URL.createObjectURL(await makeZip(done));
+      const a = document.createElement('a');
+      a.href = url; a.download = 'heic-to-png.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } finally { zipBtn.disabled = false; }
+  });
+
+  $('clear').addEventListener('click', () => {
+    items.forEach((i) => i.url && URL.revokeObjectURL(i.url));
+    items = []; list.innerHTML = ''; refreshBar();
+  });
+
+  pick.addEventListener('change', () => { addFiles([...pick.files]); pick.value = ''; });
+  drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick.click(); } });
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, () => drop.classList.remove('over')));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); addFiles([...e.dataTransfer.files]); });
+  // 페이지 아무 곳에 떨어뜨려도 브라우저가 파일을 열어버리지 않게
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => { if (!drop.contains(e.target)) { e.preventDefault(); addFiles([...e.dataTransfer.files]); } });
+})();
+</script>
+</body>
+</html>
