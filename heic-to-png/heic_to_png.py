@@ -25,6 +25,13 @@ except ImportError:
 
 register_heif_opener()
 
+# 중국어(GBK) 등 한글이 없는 콘솔 인코딩에서도 한글 경로를 출력하다 죽지 않게 한다.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 HEIC_EXTS = {".heic", ".heif", ".hif"}
 
 
@@ -35,9 +42,16 @@ def collect(inputs: list[str], recursive: bool) -> list[tuple[Path, Path]]:
         p = Path(raw)
         if p.is_dir():
             pattern = "**/*" if recursive else "*"
+            others = 0
             for f in sorted(p.glob(pattern)):
-                if f.is_file() and f.suffix.lower() in HEIC_EXTS:
+                if not f.is_file():
+                    continue
+                if f.suffix.lower() in HEIC_EXTS:
                     found.append((f, p))
+                else:
+                    others += 1
+            if others:
+                print(f"[안내] {p} 안의 HEIC가 아닌 파일 {others}개(JPG, 동영상 등)는 그대로 둡니다.")
         elif p.is_file():
             found.append((p, p.parent))
         else:
