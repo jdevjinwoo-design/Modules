@@ -266,6 +266,8 @@ def run(args) -> int:
           + (f" (비율 {len(aspect)}종 — 비율이 다르면 위치가 어긋날 수 있음)" if len(aspect) > 1 else ""))
 
     debug = dst / "_debug" if args.debug else None
+    if args.pick or args.box or args.center:
+        return run_center(args, src, dst, paths, debug)
     if args.mask:
         base = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
         base = (cv2.resize(base, ref, interpolation=cv2.INTER_NEAREST) > 127).astype(np.uint8) * 255
@@ -324,11 +326,45 @@ def run(args) -> int:
     return 1 if fails else 0
 
 
+def run_center(args, src, dst, paths, debug) -> int:
+    from center import CenterModel, pick_box
+    box = None
+    if args.box:
+        box = tuple(int(v) for v in args.box.split(","))
+    elif args.pick:
+        print(f"      첫 사진에서 워터마크를 박스로 감싸세요: {paths[0].name}")
+        box = pick_box(paths[0])
+        dst.mkdir(parents=True, exist_ok=True)
+        (dst / "box.txt").write_text(",".join(map(str, box)))
+        print(f"      박스 {box}  (다음엔 --box {','.join(map(str, box))} 로 재사용)")
+    print("[2/3] 워터마크 위치·크기·투명도 추정 중...")
+    model = CenterModel(paths, box, thresh=args.thresh, dilate=2 if args.dilate is None else args.dilate,
+                        min_area=args.min_area, debug_dir=debug)
+    print("[3/3] 복원 중 (역블렌딩)")
+    fails = 0
+    for i, p in enumerate(paths, 1):
+        try:
+            out_path = dst / p.relative_to(src)
+            res, m = model.restore(imread(p), p.name)
+            imwrite(out_path, res, quality=args.quality)
+            if debug:
+                imwrite(debug / "masks" / (p.stem + ".png"), m)
+            print(f"  ({i}/{len(paths)}) ok   {p.relative_to(src)}")
+        except Exception as e:
+            fails += 1
+            print(f"  ({i}/{len(paths)}) FAIL {p.name}: {e}", file=sys.stderr)
+    print(f"완료: {len(paths) - fails}장 → {dst}" + (f", 실패 {fails}장" if fails else ""))
+    return 1 if fails else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="여러 사진에 공통으로 있는 워터마크 자동 제거")
     ap.add_argument("input", help="원본 사진 폴더")
     ap.add_argument("output", help="결과 저장 폴더 (하위 폴더 구조 유지)")
     ap.add_argument("-b", "--backend", choices=BACKENDS, default="opencv")
+    ap.add_argument("--pick", action="store_true", help="첫 사진에서 워터마크를 마우스로 박스 지정 (정중앙 워터마크용)")
+    ap.add_argument("--box", help="박스를 직접 지정: x,y,w,h (첫 사진 기준 픽셀)")
+    ap.add_argument("--center", action="store_true", help="박스 없이 정중앙 워터마크 자동 탐색")
     ap.add_argument("--mask", help="직접 그린 마스크(흰색=워터마크). 지정하면 자동 추정 생략")
     ap.add_argument("--mask-only", action="store_true", help="마스크만 추정해서 저장하고 종료")
     ap.add_argument("--thresh", type=float, help="엣지 임계값 수동 지정 (기본: 자동)")
@@ -339,6 +375,7 @@ def main(argv=None):
     ap.add_argument("--quality", type=int, default=95, help="JPEG 저장 품질")
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--debug", action="store_true", help="output/_debug 에 중간 결과 저장")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.exit(run(ap.parse_args(argv)))
 
 
