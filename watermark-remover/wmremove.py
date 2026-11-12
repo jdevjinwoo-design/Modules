@@ -182,7 +182,10 @@ class LamaBackend:
                         f.write(chunk)
                 tmp.replace(path)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = torch.jit.load(str(path), map_location=self.device).eval()
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.model = torch.jit.load(str(path), map_location=self.device).eval()
 
     def _run(self, img, mask):
         t = self.torch
