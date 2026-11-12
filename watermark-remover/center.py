@@ -46,6 +46,50 @@ def _mask_from_resp(resp, thresh=None, min_area=20):
     return _fill_holes(keep)
 
 
+def consensus_mask(crops, min_votes=None):
+    """모든 사진에 공통으로 있는 윤곽선 → 윤곽으로 나뉜 영역 중 '흰색이 덧칠된' 영역을 채워 글자 모양 마스크."""
+    k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1,) * 2)
+    n_img = len(crops)
+    min_votes = min_votes or max(2, n_img - max(1, n_img // 5))
+    grays = [cv2.cvtColor(c, cv2.COLOR_BGR2GRAY) for c in crops]
+    votes = np.zeros(grays[0].shape, np.float32)
+    for g in grays:
+        e = cv2.Canny(cv2.GaussianBlur(g, (3, 3), 0), 10, 30)
+        votes += cv2.dilate(e, np.ones((3, 3), np.uint8)) > 0
+    cons = (votes >= min_votes).astype(np.uint8) * 255
+    e = cv2.morphologyEx(cons, cv2.MORPH_CLOSE, k(2))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(e, 8)
+    keep = np.zeros_like(e)
+    if n > 1:
+        big = st[1:, cv2.CC_STAT_AREA].max()
+        for i in range(1, n):
+            if st[i, cv2.CC_STAT_AREA] >= 0.02 * big:
+                keep[lab == i] = 255
+    h, w = keep.shape
+    gf = [g.astype(np.float32) for g in grays]
+    bgs = [cv2.medianBlur(g, 151 if min(h, w) > 151 else (min(h, w) // 2) * 2 - 1).astype(np.float32) for g in grays]
+    # 윤곽의 작은 틈 때문에 글자 안쪽이 바깥과 이어지지 않도록, 영역 분할은 틈을 더 메운 윤곽으로
+    loose = (votes >= max(2, min_votes - 1)).astype(np.uint8) * 255
+    loose = cv2.bitwise_and(loose, cv2.dilate(keep, k(6)))   # 주 윤곽 근처의 끊긴 부분만 이어줌
+    sep = cv2.morphologyEx(cv2.bitwise_or(keep, loose), cv2.MORPH_CLOSE, k(3))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(cv2.bitwise_not(sep), 4)
+    sil = keep.copy()
+    for i in range(1, n):
+        x, y, ww, hh, _a = st[i]
+        if x == 0 or y == 0 or x + ww == w or y + hh == h:
+            continue
+        r = lab == i
+        num = sum(float((g[r] - b[r]).mean()) for g, b in zip(gf, bgs))
+        den = sum(float((255 - b[r]).mean()) for b in bgs)
+        if num / max(den, 1) > 0.06:
+            sil[r] = 255
+    sil = cv2.morphologyEx(sil, cv2.MORPH_OPEN, k(2))
+    # 안쪽 판정이 빠진 얇은 획(예: m의 다리)도 덮이도록 윤곽선 띠를 넉넉히 포함
+    sil = cv2.bitwise_or(sil, cv2.dilate(keep, k(4)))
+    # 획 사이 좁은 틈(m의 다리 사이 등)은 메울 때 엉뚱한 색을 끌어오므로 같이 덮음
+    return _fill_holes(cv2.morphologyEx(sil, cv2.MORPH_CLOSE, k(6)))
+
+
 class CenterModel:
     def __init__(self, paths, box=None, *, thresh=None, dilate=3, min_area=20, log=print, debug_dir=None):
         self.log = log
@@ -81,6 +125,9 @@ class CenterModel:
 
         crops = [self._patch(im, T) for im, T in zip(imgs, self.T)]
         edge = _mask_from_resp(_median_resp([cv2.cvtColor(c, cv2.COLOR_BGR2GRAY) for c in crops]), thresh, min_area)
+        self.shape = consensus_mask(crops)
+        if dilate:
+            self.shape = cv2.dilate(self.shape, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate + 1,) * 2))
         self.mask, self.alpha, self.W, D = self._estimate(crops, edge, dilate)
         log(f"      크기 기준='{self.mode}', 워터마크 색(BGR)={np.round(self.W).astype(int).tolist()}, "
             f"최대 불투명도={self.alpha.max():.2f}")
@@ -88,6 +135,7 @@ class CenterModel:
             debug_dir.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(debug_dir / "mean_diff.png"), np.clip(np.abs(D).max(2) * 4, 0, 255).astype(np.uint8))
             cv2.imwrite(str(debug_dir / "mask.png"), self.mask)
+            cv2.imwrite(str(debug_dir / "shape_mask.png"), self.shape)
             cv2.imwrite(str(debug_dir / "alpha.png"), np.clip(self.alpha * 255, 0, 255).astype(np.uint8))
         self._byname = dict(zip(self.names, self.T))
 
@@ -198,6 +246,13 @@ class CenterModel:
         return mask, a.astype(np.float32), W.astype(np.float32), D
 
     # ---------------- 사진 한 장 복원
+    def mask_for(self, img, name=None):
+        """글자 모양 마스크를 이 사진 좌표로 옮긴 것 (인페인팅 백엔드용)."""
+        h, w = img.shape[:2]
+        cx, cy, s = self._byname.get(name) or self._T0(img)
+        Mi = np.float32([[1 / s, 0, self.x0 / s + cx], [0, 1 / s, self.y0 / s + cy]])
+        return cv2.warpAffine(self.shape, Mi, (w, h), flags=cv2.INTER_NEAREST)
+
     edge_fix = True
 
     def restore(self, img, name=None, inpaint_above=0.85):
